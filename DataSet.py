@@ -43,10 +43,6 @@ print("Filas con CABA:", dnrpa_caba.shape)
 # ==========================
 # 4️⃣ LIMPIEZA DE DATOS
 # ==========================
-cols_nulas = dnrpa_caba.columns[dnrpa_caba.isnull().mean() > umbral]
-dnrpa_caba = dnrpa_caba.drop(columns=cols_nulas)
-dnrpa_caba = dnrpa_caba.fillna({'titular_domicilio_localidad': 'SIN_LOCALIDAD'})
-print("Columnas eliminadas:", list(cols_nulas))
 
 # ==========================
 # 5️⃣ CREACIÓN DE VARIABLES
@@ -66,17 +62,6 @@ print("\n📋 Información general del dataset:")
 print(dnrpa_caba.info())
 print("\nEstadísticas descriptivas:")
 print(dnrpa_caba.describe(include='all').T)
-
-# ---- 2️⃣ Valores nulos ----
-cols_with_nulls = dnrpa_caba.columns[dnrpa_caba.isnull().any()]
-subset = dnrpa_caba[cols_with_nulls].head(500)  # limitar a primeras 500 filas
-
-plt.figure(figsize=(12,6))
-sns.heatmap(subset.isnull(), cbar=False, yticklabels=False, cmap='mako')
-plt.title("🧯 Mapa de calor de valores nulos (primeras 500 filas)")
-plt.tight_layout()
-plt.show()
-
 
 # ---- 3️⃣ Localidades con más robos ----
 robos_por_loc = (
@@ -202,8 +187,72 @@ try:
 except Exception as e:
     print("⚠️ No se pudo generar el mapa geográfico:", e)
 
+# ==========================
+# 🔥 MAPA DE CALOR: ROBOS POR MARCA Y LOCALIDAD (solo Buenos Aires)
+# ==========================
 
+# 1️⃣ Filtramos solo localidades de Buenos Aires (incluyendo CABA si querés)
+dnrpa_ba = dnrpa_caba[
+    dnrpa_caba['titular_domicilio_provincia']
+    .str.contains("BUENOS AIRES|CABA", case=False, na=False)
+].copy()
 
+# 2️⃣ Tomamos las 10 marcas más robadas
+top_10_marcas = (
+    dnrpa_ba['automotor_marca_descripcion_clean']
+    .value_counts()
+    .nlargest(10)
+    .index
+)
+
+# 3️⃣ Agrupamos las demás como "OTRAS"
+dnrpa_ba['marca_grupo'] = dnrpa_ba['automotor_marca_descripcion_clean'].apply(
+    lambda x: x if x in top_10_marcas else 'OTRAS'
+)
+
+# 4️⃣ Agrupamos por localidad y marca
+robos_loc_marca = (
+    dnrpa_ba
+    .groupby(['titular_domicilio_localidad', 'marca_grupo'])
+    .size()
+    .reset_index(name='robos')
+)
+
+# 5️⃣ Creamos una tabla pivote para el mapa de calor
+pivot_heatmap = robos_loc_marca.pivot_table(
+    index='titular_domicilio_localidad',
+    columns='marca_grupo',
+    values='robos',
+    fill_value=0
+)
+
+# 6️⃣ Mostramos las 20 localidades con más robos totales
+top_localidades = (
+    robos_loc_marca
+    .groupby('titular_domicilio_localidad')['robos']
+    .sum()
+    .nlargest(20)
+    .index
+)
+pivot_heatmap = pivot_heatmap.loc[top_localidades]
+
+# 7️⃣ Graficamos el mapa de calor
+plt.figure(figsize=(12,8))
+sns.heatmap(
+    pivot_heatmap,
+    cmap="Reds",
+    linewidths=0.5,
+    linecolor='gray',
+    annot=True,
+    fmt='.0f'
+)
+plt.title("🔥 Mapa de calor de robos de autos por marca y localidad (Buenos Aires)")
+plt.xlabel("Marca de auto")
+plt.ylabel("Localidad")
+plt.tight_layout()
+plt.show()
+
+"""
 # ==========================
 # 6️⃣ VARIABLE OBJETIVO
 # ==========================
@@ -270,6 +319,7 @@ if len(X) > 0:
 else:
     print("⚠️ No hay datos suficientes para entrenar modelos.")
 
+"""
 # ==========================
 # 🔟 EXPORTAR RESULTADOS
 # ==========================

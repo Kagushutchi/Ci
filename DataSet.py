@@ -1,118 +1,145 @@
+from sklearn.ensemble import RandomForestClassifier
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.metrics import classification_report, confusion_matrix
 import matplotlib.pyplot as plt
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 import seaborn as sns
 import geopandas as gpd
 
+"""
+Head of the file: tramite_tipo,tramite_fecha,fecha_inscripcion_inicial,registro_seccional_codigo,registro_seccional_descripcion,registro_seccional_provincia,automotor_origen,automotor_anio_modelo,automotor_tipo_codigo,automotor_tipo_descripcion,automotor_marca_codigo,automotor_marca_descripcion,automotor_modelo_codigo,automotor_modelo_descripcion,automotor_uso_codigo,automotor_uso_descripcion,titular_tipo_persona,titular_domicilio_localidad,titular_domicilio_provincia,titular_genero,titular_anio_nacimiento,titular_pais_nacimiento,titular_porcentaje_titularidad,titular_domicilio_provincia_indec_id,titular_pais_nacimiento_indec_id,titular_domicilio_provincia_id,titular_pais_nacimiento_id
+DENUNCIA DE ROBO O HURTO,2018-01-17,2000-10-05,1029,ESTEBAN ECHEVERRIA Nº 1,Buenos Aires,Nacional,2000.0,,SEDAN,08,CHEVROLET,57,CORSA 4 PUERTAS WIND 1.6 MPFI,1.0,Privado,Física,MONTE GRANDE,BUENOS AIRES,Masculino,1981.0,Argentina,100.0,6.0,ARG,,
+DENUNCIA DE ROBO O HURTO,2018-01-03,2007-11-22,1047,LANUS Nº 1,Buenos Aires,Nacional,2007.0,,FURGON 600,34,PEUGEOT,EP,PARTNER FURGON D PLC PRESENCE,1.0,Privado,Física,VALENTIN ALSINA,BUENOS AIRES,Femenino,1990.0,Argentina,100.0,6.0,ARG,,
+DENUNCIA DE ROBO O HURTO,2018-01-12,1995-02-01,1059,MAR DEL PLATA Nº 02,Buenos Aires,Nacional,1995.0,,BERLINA 5 PUERTAS,37,RENAULT,AH,19 RN INYECCION BIC.,1.0,Privado,Física,UNIDAD TURISTICA CHAPADMALAL,BUENOS AIRES,Masculino,1986.0,Argentina,100.0,6.0,ARG,,
+DENUNCIA DE ROBO O HURTO,2018-01-02,1999-09-28,1066,NECOCHEA Nº 1,Buenos Aires,Nacional,1999.0,,BERLINA 3 PUERTAS,37,RENAULT,CC,CLIO RL DIESEL 3 PUERTAS,1.0,Privado,Física,NECOCHEA BS.AS.,BUENOS AIRES,No identificado,1964.0,No identificado,100.0,6.0,,,
+DENUNCIA DE ROBO O HURTO,2018-01-09,2006-09-07,1074,PILAR Nº 1,Buenos Aires,Nacional,2006.0,,FURGON 600,34,PEUGEOT,DM,PARTNER FURGON 1.4 N PRESENCE,1.0,Privado,Física,PTE. DERQUI,BUENOS AIRES,Femenino,1961.0,Argentina,100.0,6.0,ARG,,
 
+"""
 
 # ==========================
-# 1 CARGA DE DATOS
+# 1️⃣ CARGA DE DATOS
 # ==========================
-dnrpa_path = "combined_optimized.csv"
+dnrpa_path = "datos_robos_limpio.csv"
 dnrpa = pd.read_csv(dnrpa_path, low_memory=False)
 print("DNRPA:", dnrpa.shape)
 
 # ==========================
-# 2 LIMPIEZA PREVIA
+# 2️⃣ LIMPIEZA PREVIA
 # ==========================
 umbral = 0.8
 cols_nulas = dnrpa.columns[dnrpa.isnull().mean() > umbral]
 dnrpa = dnrpa.drop(columns=cols_nulas)
-dnrpa['titular_domicilio_localidad'] = dnrpa['titular_domicilio_localidad'].fillna('SIN_LOCALIDAD')
+dnrpa['titular_domicilio_localidad'] = dnrpa['titular_domicilio_localidad'].fillna(
+    'SIN_LOCALIDAD')
 
 # ==========================
-# 3 FILTRO GEOGRÁFICO
+# 3️⃣ FILTRO GEOGRÁFICO
 # ==========================
-mask_caba = dnrpa.apply(lambda col: col.astype(str).str.contains("CABA|BUENOS AIRES", case=False, na=False))
-dnrpa_caba = dnrpa[mask_caba.any(axis=1)].copy()
-print("Filas con CABA:", dnrpa_caba.shape)
+# 1. Normalizamos la columna de domicilio del titular para el filtro
+dnrpa['titular_domicilio_provincia_clean_filtro'] = dnrpa['titular_domicilio_provincia'].str.upper(
+).str.strip().fillna('')
+
+# 2. Definimos las variantes de CABA
+caba_variantes = ['CIUDAD AUTONOMA DE BUENOS AIRES', 'C.AUTONOMA DE BS.AS',
+                  'C.AUTONOMA BS.AS.', 'CABA', 'C.A.B.A', 'CAPITAL FEDERAL']
+
+# 3. Creamos una máscara estricta para la Provincia de Buenos Aires, excluyendo CABA
+mask_gba = (
+    (dnrpa['titular_domicilio_provincia_clean_filtro'].str.contains("BUENOS AIRES|BS.AS", case=False, na=False)) &
+    (~dnrpa['titular_domicilio_provincia_clean_filtro'].isin(caba_variantes)) &
+    (~dnrpa['titular_domicilio_provincia_clean_filtro'].str.contains(
+        "CABA|AUTONOMA|FEDERAL", case=False, na=False))
+)
+
+# Filtramos y usamos 'dnrpa_gba'
+dnrpa_gba = dnrpa[mask_gba].copy()
+print("Filas con Provincia de Buenos Aires (excluyendo CABA):", dnrpa_gba.shape)
+# ==========================
+# 4️⃣ LIMPIEZA DE DATOS
+# ==========================
 
 # ==========================
-# 4 LIMPIEZA DE DATOS
+# 5️⃣ CREACIÓN DE VARIABLES
+# ==========================
+dnrpa_gba['automotor_anio_modelo'] = pd.to_numeric(
+    dnrpa_gba['automotor_anio_modelo'], errors='coerce')
+# Usaremos 'tramite_anio' para calcular la edad más adelante
+dnrpa_gba['tramite_fecha'] = pd.to_datetime(
+    dnrpa_gba['tramite_fecha'], errors='coerce')
+mediana_anio_tramite = dnrpa_gba['tramite_fecha'].dt.year.median()
+dnrpa_gba['tramite_anio'] = dnrpa_gba['tramite_fecha'].dt.year.fillna(
+    mediana_anio_tramite).astype(int)
+
+mediana_anio_modelo = dnrpa_gba['automotor_anio_modelo'].median()
+dnrpa_gba['automotor_anio_modelo'] = dnrpa_gba['automotor_anio_modelo'].fillna(
+    mediana_anio_modelo)
+
+dnrpa_gba['vehicle_age'] = dnrpa_gba['tramite_anio'] - \
+    dnrpa_gba['automotor_anio_modelo']
+dnrpa_gba['vehicle_age'] = dnrpa_gba['vehicle_age'].apply(lambda x: max(0, x))
+dnrpa_gba['vehicle_age'] = dnrpa_gba['vehicle_age'].fillna(
+    dnrpa_gba['vehicle_age'].median())
+
+
+robos_por_loc = dnrpa_gba.groupby(
+    'titular_domicilio_localidad').size().reset_index(name='robos_count')
+dnrpa_gba = dnrpa_gba.merge(
+    robos_por_loc, on='titular_domicilio_localidad', how='left')
+# ==========================
+# 📊 ANÁLISIS EXPLORATORIO
 # ==========================
 
-# ==========================
-# 5 CREACIÓN DE VARIABLES
-# ==========================
-dnrpa_caba['automotor_anio_modelo'] = pd.to_numeric(dnrpa_caba['automotor_anio_modelo'], errors='coerce')
-dnrpa_caba['vehicle_age'] = 2025 - dnrpa_caba['automotor_anio_modelo']
-
-robos_por_loc = dnrpa_caba.groupby('titular_domicilio_localidad').size().reset_index(name='robos_count')
-dnrpa_caba = dnrpa_caba.merge(robos_por_loc, on='titular_domicilio_localidad', how='left')
-
-# ==========================
-# ANÁLISIS EXPLORATORIO DE DATOS (EDA)
-# ==========================
-
-# ---- 1 Revisión general ----
-print("\n Información general del dataset:")
-print(dnrpa_caba.info())
-print("\nEstadísticas descriptivas:")
-print(dnrpa_caba.describe(include='all').T)
-
-# ---- 3 Localidades con más robos ----
-robos_por_loc = (
-    dnrpa_caba['titular_domicilio_localidad']
+# ---- Localidades con más robos ----
+top_localidades = (
+    dnrpa_gba['titular_domicilio_localidad']
     .value_counts()
     .rename_axis('titular_domicilio_localidad')
     .reset_index(name='robos_count')
 )
 
-
-print("\nTop 10 localidades con más robos:")
-print(robos_por_loc.head(10))
-
-plt.figure(figsize=(10,6))
+plt.figure(figsize=(10, 6))
 sns.barplot(
-    data=robos_por_loc.head(20),
+    data=top_localidades.head(20),
     x='robos_count',
     y='titular_domicilio_localidad',
-    hue='titular_domicilio_localidad',  # Usamos y como hue
     palette='Reds_r',
     legend=False
 )
-plt.title(" Top 20 localidades con más robos de autos")
+plt.title("🏙️ Top 20 localidades con más robos de autos")
 plt.xlabel("Cantidad de robos")
 plt.ylabel("Localidad")
 plt.tight_layout()
 plt.show()
 
-# ---- 4 Marcas más robadas ----
-dnrpa_caba['automotor_marca_descripcion_clean'] = (
-    dnrpa_caba['automotor_marca_descripcion']
+# ---- Marcas más robadas ----
+top_marcas = (
+    dnrpa_gba['marca']
     .str.upper()
     .str.strip()
-)
-
-top_marcas = (
-    dnrpa_caba['automotor_marca_descripcion_clean']
     .value_counts()
     .head(10)
     .rename_axis('Marca')
     .reset_index(name='Cantidad de robos')
 )
 
-plt.figure(figsize=(10,6))
+plt.figure(figsize=(10, 6))
 sns.barplot(
     data=top_marcas,
     x='Cantidad de robos',
     y='Marca',
     palette='Oranges_r',
-    hue='Marca',
     legend=False
 )
-plt.title("Top 10 marcas más robadas")
+plt.title("🚗 Top 10 marcas más robadas")
 plt.tight_layout()
 plt.show()
 
-# ---- 5 Modelos más robados ----
+# ---- Modelos más robados ----
 top_modelos = (
-    dnrpa_caba['automotor_modelo_descripcion']
+    dnrpa_gba['automotor_modelo_descripcion']
     .str.upper()
     .str.strip()
     .value_counts()
@@ -121,105 +148,62 @@ top_modelos = (
     .reset_index(name='Cantidad de robos')
 )
 
-
-plt.figure(figsize=(10,6))
-sns.barplot(data=top_modelos, x='Cantidad de robos', y='Modelo', palette='Blues_r')
-plt.title("Modelos más robados")
+plt.figure(figsize=(10, 6))
+sns.barplot(data=top_modelos, x='Cantidad de robos',
+            y='Modelo', palette='Blues_r')
+plt.title("🚙 Modelos más robados")
 plt.tight_layout()
 plt.show()
 
-# ---- 6 Relación año del vehículo vs robos ----
-plt.figure(figsize=(10,5))
-sns.histplot(
-    dnrpa_caba['automotor_anio_modelo'].dropna(),
-    bins=30,
-    kde=True,
-    color='steelblue'
+# ---- Tipos de vehículo más robados ----
+top_tipos = (
+    dnrpa_gba['automotor_tipo_descripcion']
+    .str.upper()
+    .str.strip()
+    .value_counts()
+    .head(10)
+    .rename_axis('Tipo')
+    .reset_index(name='Cantidad de robos')
 )
-plt.title("Distribución del año del vehículo en robos")
+
+plt.figure(figsize=(10, 6))
+sns.barplot(data=top_tipos, x='Cantidad de robos',
+            y='Tipo', palette='Purples_r')
+plt.title("🚐 Tipos de vehículo más robados")
+plt.tight_layout()
+plt.show()
+
+# ---- Distribución por año de modelo ----
+plt.figure(figsize=(10, 5))
+sns.histplot(dnrpa_gba['automotor_anio_modelo'].dropna(),
+             bins=30, kde=True, color='steelblue')
+plt.title("📅 Distribución del año del vehículo en robos")
 plt.xlabel("Año del vehículo")
 plt.ylabel("Cantidad de robos")
-
-# Limitar el eje X desde el 2000
-plt.xlim(2000, dnrpa_caba['automotor_anio_modelo'].max())
-
 plt.tight_layout()
 plt.show()
 
-# ---- 7 Mapa de calor geográfico (usando GeoPandas) ----
-# Cargamos un shapefile con los límites de provincias argentinas
-try:
-
-    # Cargar mapa de provincias
-    provincias = gpd.read_file("https://raw.githubusercontent.com/juaneladio/argentina-geojson/master/argentina.json")
-    provincias = provincias.rename(columns={'name': 'provincia'})
-    provincias['provincia'] = provincias['provincia'].str.upper()
-
-    # Agrupar robos por provincia
-    robos_por_prov = (
-        dnrpa_caba['titular_domicilio_provincia']
-        .value_counts()
-        .reset_index()
-        .rename(columns={'index': 'provincia', 'titular_domicilio_provincia': 'robos'})
-    )
-    robos_por_prov['provincia'] = robos_por_prov['provincia'].str.upper()
-
-    # Normalizar nombres
-    robos_por_prov['provincia'] = robos_por_prov['provincia'].replace({
-        'BUENOS AIRES': 'PROVINCIA DE BUENOS AIRES',
-        'CABA': 'CIUDAD AUTONOMA DE BUENOS AIRES',
-    })
-
-    provincias_robos = provincias.merge(robos_por_prov, on='provincia', how='left').fillna(0)
-    # Graficar
-    plt.figure(figsize=(8,8))
-    provincias_robos['robos_log'] = np.log1p(provincias_robos['robos']) 
-    provincias_robos.plot(
-    column='robos_log',
-    cmap='OrRd',  
-    linewidth=0.8,
-    edgecolor='black',
-    legend=True
-    )
-    plt.title("🗺️ Mapa de calor: robos de autos por provincia")
-    plt.axis('off')
-    plt.show()
-
-except Exception as e:
-    print("⚠️ No se pudo generar el mapa geográfico:", e)
-
 # ==========================
-#  MAPA DE CALOR: ROBOS POR MARCA Y LOCALIDAD 
+# 🔥 MAPA DE CALOR: ROBOS POR MARCA Y LOCALIDAD
 # ==========================
-
-# 1 Filtramos solo localidades de Buenos Aires 
-dnrpa_ba = dnrpa_caba[
-    dnrpa_caba['titular_domicilio_provincia']
-    .str.contains("BUENOS AIRES|CABA", case=False, na=False)
-].copy()
-
-# 2 Tomamos las 10 marcas más robadas
 top_10_marcas = (
-    dnrpa_ba['automotor_marca_descripcion_clean']
+    dnrpa_gba['marca']
     .value_counts()
     .nlargest(10)
     .index
 )
 
-# 3 Agrupamos las demás como "OTRAS"
-dnrpa_ba['marca_grupo'] = dnrpa_ba['automotor_marca_descripcion_clean'].apply(
+dnrpa_gba['marca_grupo'] = dnrpa_gba['marca'].apply(
     lambda x: x if x in top_10_marcas else 'OTRAS'
 )
 
-# 4 Agrupamos por localidad y marca
 robos_loc_marca = (
-    dnrpa_ba
+    dnrpa_gba
     .groupby(['titular_domicilio_localidad', 'marca_grupo'])
     .size()
     .reset_index(name='robos')
 )
 
-# 5 Creamos una tabla pivote para el mapa de calor
 pivot_heatmap = robos_loc_marca.pivot_table(
     index='titular_domicilio_localidad',
     columns='marca_grupo',
@@ -227,18 +211,16 @@ pivot_heatmap = robos_loc_marca.pivot_table(
     fill_value=0
 )
 
-# 6 Mostramos las 20 localidades con más robos totales
-top_localidades = (
+top_localidades_heatmap = (
     robos_loc_marca
     .groupby('titular_domicilio_localidad')['robos']
     .sum()
     .nlargest(20)
     .index
 )
-pivot_heatmap = pivot_heatmap.loc[top_localidades]
+pivot_heatmap = pivot_heatmap.loc[top_localidades_heatmap]
 
-# 7 Graficamos el mapa de calor
-plt.figure(figsize=(12,8))
+plt.figure(figsize=(12, 8))
 sns.heatmap(
     pivot_heatmap,
     cmap="Reds",
@@ -247,82 +229,255 @@ sns.heatmap(
     annot=True,
     fmt='.0f'
 )
-plt.title("Mapa de calor de robos de autos por marca y localidad (Buenos Aires)")
-plt.xlabel("Marca de auto")
+plt.title("🔥 Mapa de calor de robos por marca y localidad (Buenos Aires)")
+plt.xlabel("Marca")
 plt.ylabel("Localidad")
 plt.tight_layout()
 plt.show()
-
-"""
-# ==========================
-# 6 VARIABLE OBJETIVO
-# ==========================
-dnrpa_caba['risk_score'] = dnrpa_caba['robos_count'].fillna(0).rank(pct=True)
-dnrpa_caba['risk_level'] = pd.qcut(dnrpa_caba['risk_score'], q=3, labels=['bajo', 'medio', 'alto'])
+dnrpa_gba['risk_score'] = dnrpa_gba['robos_count'].fillna(0).rank(pct=True)
+dnrpa_gba['risk_level'] = pd.qcut(
+    dnrpa_gba['risk_score'], q=3, labels=['bajo', 'medio', 'alto'])
 print("Distribución de riesgo:")
-print(dnrpa_caba['risk_level'].value_counts())
+print(dnrpa_gba['risk_level'].value_counts())
 
 # ==========================
-# 7 PREPARACIÓN DE FEATURES
+# 6️⃣ FUNCIÓN DE AGRUPACIÓN Y ENCODING
 # ==========================
-dnrpa_caba['robos_count'] = dnrpa_caba['robos_count'].fillna(0)
-dnrpa_caba['vehicle_age'] = dnrpa_caba['vehicle_age'].fillna(dnrpa_caba['vehicle_age'].median())
-dnrpa_caba['automotor_marca_descripcion'] = dnrpa_caba['automotor_marca_descripcion'].fillna('SIN_MARCA')
 
-features = ['vehicle_age', 'automotor_marca_descripcion'] #  CORREGIDO: Usar solo las variables independientes
 
-dnrpa_caba = dnrpa_caba.dropna(subset=features)
+def map_top_n(series, n):
+    top_n = series.value_counts().nlargest(n).index
+    return series.apply(lambda x: x if x in top_n else 'OTROS')
 
-top_marcas = dnrpa_caba['automotor_marca_descripcion'].value_counts().nlargest(20).index
-# Reemplazar las marcas raras con 'OTROS'
-dnrpa_caba['automotor_marca_descripcion_clean'] = dnrpa_caba['automotor_marca_descripcion'].apply(lambda x: x if x in top_marcas else 'OTRAS')
 
-# Cambiar la lista de features para usar la columna limpia
-features = ['vehicle_age', 'automotor_marca_descripcion_clean']
-dnrpa_caba = dnrpa_caba.dropna(subset=features)
-
-X = dnrpa_caba[features].copy()
-y = dnrpa_caba['risk_level']
-# Codificar la nueva columna con menos categorías
-X = pd.get_dummies(X, columns=['automotor_marca_descripcion_clean'], drop_first=True)
+def frequency_encoding(df, col, new_col_name=None):
+    counts = df[col].value_counts(dropna=False)
+    freq = counts / len(df)
+    mapping = freq.to_dict()
+    if new_col_name is None:
+        new_col_name = f'{col}_freq'
+    df[new_col_name] = df[col].map(mapping).fillna(0)
+    return df
 
 # ==========================
-# 8 SPLIT TRAIN/TEST
+# 7️⃣ OPTIMIZACIÓN DE FEATURES (AJUSTADA)
 # ==========================
-if len(X) > 0:
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
-    models = {
-        "Logistic Regression": LogisticRegression(max_iter=1000),
-        "Random Forest": RandomForestClassifier(n_estimators=200, random_state=42),
-        "Gradient Boosting": GradientBoostingClassifier(n_estimators=200, random_state=42)
-    }
 
-    results = {}
-    for name, model in models.items():
-        model.fit(X_train, y_train)
-        preds = model.predict(X_test)
-        print(f"\n {name}")
-        print(classification_report(y_test, preds))
-        results[name] = (y_test, preds)
+# --- Limpieza básica
+# **USAMOS 'marca' de tu nuevo header**
+dnrpa_gba['automotor_marca_clean'] = dnrpa_gba['marca'].str.upper(
+).str.strip().fillna('SIN_MARCA')
+
+# **USAMOS 'modelo_normalizado' de tu nuevo header**
+dnrpa_gba['automotor_modelo_clean'] = dnrpa_gba['modelo_normalizado'].str.upper(
+).str.strip().fillna('SIN_MODELO')
+
+# Limpieza de la nueva feature de ubicación
+dnrpa_gba['titular_domicilio_localidad_clean'] = dnrpa_gba['titular_domicilio_localidad'].str.upper(
+).str.strip().fillna('SIN_LOCALIDAD')
+
+# --- Top-N + OTROS para categóricas
+dnrpa_gba['automotor_marca_desc_top'] = map_top_n(
+    dnrpa_gba['automotor_marca_clean'], 20)
+
+# === NUEVA FEATURE DE UBICACIÓN (Localidad del titular) ===
+# Reemplaza 'registro_seccional_desc_top'
+dnrpa_gba['titular_domicilio_localidad_top'] = map_top_n(
+    dnrpa_gba['titular_domicilio_localidad_clean'], 50)
+
+
+# --- Frequency encoding para modelo (Usando modelo normalizado)
+dnrpa_gba = frequency_encoding(
+    dnrpa_gba, 'automotor_modelo_clean', 'modelo_freq')
+
+
+# --- Fecha
+dnrpa_gba['tramite_mes'] = dnrpa_gba['tramite_fecha'].dt.month.fillna(
+    0).astype(int)  # 0 para nulos
+
+
+# --- Variables finales (ACTUALIZADA) ---
+features = [
+    'vehicle_age',
+    'automotor_marca_desc_top',
+    # <--- NUEVA FEATURE (Localidad del titular)
+    'titular_domicilio_localidad_top',
+    'modelo_freq',
+    'tramite_mes',
+    'tramite_anio'
+]
+# Eliminamos la antigua 'registro_seccional_desc_top' y 'titular_domicilio_provincia_top'
+
+# Eliminamos filas donde CUALQUIERA de nuestras features clave tenga nulos
+dnrpa_gba = dnrpa_gba.dropna(subset=features)
+
+# --- One-hot encoding para las categóricas finales
+X = dnrpa_gba[features].copy()
+X = pd.get_dummies(X, drop_first=True)
+
+# --- Target
+y = dnrpa_gba['risk_level']
+
+# ==========================
+# 8️⃣ SPLIT TRAIN/TEST
+# ==========================
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+# ==========================
+# 🌲 RANDOM FOREST + IMPORTANCIA DE FEATURES
+# ==========================
+importances = None
+
+if len(X_train) > 0:
+    rf_model = RandomForestClassifier(
+        n_estimators=300, random_state=42, n_jobs=-1)
+    rf_model.fit(X_train, y_train)
+
+    # Crear DataFrame con importancias originales
+    importances = pd.DataFrame({
+        'Feature': X.columns,
+        'Importance': rf_model.feature_importances_
+    }).sort_values(by='Importance', ascending=False)
 
     # ==========================
-    # 9 MATRIZ DE CONFUSIÓN (VISUAL)
+    # 🌲 IMPORTANCIA DE FEATURES (Agrupada - AJUSTADA)
     # ==========================
-    for name, (yt, yp) in results.items():
-        plt.figure(figsize=(5, 4))
-        cm = confusion_matrix(yt, yp, labels=['bajo', 'medio', 'alto'])
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['bajo','medio','alto'], yticklabels=['bajo','medio','alto'])
-        plt.title(f"Matriz de confusión - {name}")
-        plt.xlabel("Predicho")
-        plt.ylabel("Real")
-        plt.show()
+
+# ========= Agrupar por categoría base (AJUSTADA) =========
+    def agrupar_feature(nombre):
+        if 'automotor_marca_desc_top' in nombre:
+            return 'Marca'
+        elif 'modelo_freq' in nombre:
+            return 'Modelo (Freq)'
+        # === GRUPO ACTUALIZADO ===
+        elif 'titular_domicilio_localidad_top' in nombre:
+            return 'Domicilio Localidad'
+        elif 'vehicle_age' in nombre:
+            return 'Antigüedad Vehículo'
+        else:
+            return nombre  # Tramite mes/anio
+
+    importances['Grupo'] = importances['Feature'].apply(agrupar_feature)
+
+# Sumar importancia por grupo
+    grouped_importances = (
+        importances.groupby('Grupo', as_index=False)
+        .agg({'Importance': 'sum'})
+        .sort_values(by='Importance', ascending=False)
+        )
+
+    print("\n🌟 Importancia agrupada de las variables (Random Forest):")
+    print(grouped_importances.head(15))
+
+    # Visualización agrupada
+    plt.figure(figsize=(10, 6))
+    sns.barplot(data=grouped_importances.head(15),
+                x='Importance', y='Grupo', palette='viridis')
+    plt.title("🌲 Importancia de las principales variables (agrupadas)")
+    plt.tight_layout()
+    plt.show()
+
 else:
-    print(" No hay datos suficientes para entrenar modelos.")
+    print("⚠️ No hay datos suficientes para entrenar modelos.")
+# ==========================
+# 9️⃣ EVALUACIÓN DEL MODELO (AÑADIDO)
+# ==========================
 
-"""
+if 'rf_model' in locals():
+    # 1. Generar predicciones en el conjunto de prueba
+    y_pred = rf_model.predict(X_test)
+
+    print("\n✅ Métricas de Evaluación (Random Forest) en el conjunto de prueba:")
+
+    # 2. Classification Report (Precision, Recall, F1-Score)
+    print("\n--- Classification Report ---")
+    print(classification_report(y_test, y_pred))
+
+    # 3. Matriz de Confusión
+    cm = confusion_matrix(y_test, y_pred, labels=['bajo', 'medio', 'alto']) # Aseguramos el orden de las etiquetas
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt='d',
+        cmap='Blues',
+        xticklabels=['bajo', 'medio', 'alto'],
+        yticklabels=['bajo', 'medio', 'alto']
+    )
+    plt.title('📊 Matriz de Confusión (Random Forest)')
+    plt.xlabel('Predicción')
+    plt.ylabel('Valor Verdadero')
+    plt.show()
+
+    # 4. Accuracy Score (Opcional, pero útil)
+    accuracy = accuracy_score(y_test, y_pred)
+    print(f"\nExactitud (Accuracy): {accuracy:.4f}")
+
+else:
+    print("⚠️ El modelo 'rf_model' no pudo ser entrenado o no existe. Revise la sección 8.")
 # ==========================
-# 10 EXPORTAR RESULTADOS
+# 🔟 EXPORTAR RESULTADOS
 # ==========================
-dnrpa_caba.to_csv("autos_caba_riesgo.csv", index=False)
-print("\nArchivo exportado: autos_caba_riesgo.csv")
+dnrpa_gba.to_csv("autos_gba_riesgo.csv", index=False)
+print("\nArchivo exportado: autos_gba_riesgo.csv")
+
+
+# ==========================
+# 11️⃣ PREDICCIÓN CON NUEVOS CASOS (AÑADIDO)
+# ==========================
+
+# 1. Crear un DataFrame con datos de un nuevo caso (variables originales)
+# NOTA: Los valores de las categóricas deben coincidir con los valores únicos
+# en el training set (incluyendo 'OTROS' y marcas/localidades en el top N)
+
+nuevos_datos_originales = pd.DataFrame({
+    'vehicle_age': [3.0, 15.0, 8.0],  # Edad del vehículo
+    'automotor_marca_desc_top': ['VOLKSWAGEN', 'VOLKSWAGEN', 'OTROS'], # Marca (usando una del top o 'OTROS')
+    'titular_domicilio_localidad_top': ['LA PLATA', 'LA PLATA', 'SIN_LOCALIDAD'], # Localidad (usando una del top o 'OTROS')
+    #'modelo_freq': [0.005, 0.0001, 0.05], # Frecuencia del modelo (simulada)
+    'tramite_mes': [10, 5, 1], # Mes del trámite
+    'tramite_anio': [2023, 2024, 2022] # Año del trámite
+})
+
+# 2. Preparar los datos nuevos con One-Hot Encoding
+# La clave es usar las COLUMNAS DE X_train para asegurar que los dummies
+# de los nuevos datos sean idénticos al formato de entrenamiento.
+
+if 'rf_model' in locals():
+    # Asignamos las variables que el modelo espera
+    X_new_case = nuevos_datos_originales.copy()
+    
+    # Aplicar One-Hot Encoding
+    X_new_case_encoded = pd.get_dummies(X_new_case, drop_first=True)
+
+    # Alinear las columnas con las de entrenamiento (X_train)
+    # Rellenamos con 0 las columnas que faltan en X_new_case_encoded y
+    # eliminamos las columnas sobrantes.
+    
+    # Crear un DataFrame vacío con las columnas de X_train
+    X_new_ready = pd.DataFrame(columns=X_train.columns)
+    
+    # Llenar con los datos codificados, rellenando con 0 lo que falte
+    for col in X_train.columns:
+        if col in X_new_case_encoded.columns:
+            X_new_ready[col] = X_new_case_encoded[col]
+        else:
+            X_new_ready[col] = 0.0
+
+    # Asegurar el orden de las filas si se usa un índice diferente (aunque aquí no es un problema)
+    X_new_ready = X_new_ready.fillna(0.0) # Rellenar cualquier NaN potencial con 0
+
+    print("\n🧪 Predicciones para Nuevos Casos:")
+    
+    # 3. Realizar la predicción
+    new_predictions = rf_model.predict(X_new_ready)
+
+    # 4. Mostrar el resultado
+    resultados = nuevos_datos_originales.copy()
+    resultados['Riesgo Predicho'] = new_predictions
+    print(resultados)
+
+else:
+    print("⚠️ El modelo 'rf_model' no pudo ser entrenado para realizar la predicción en casos nuevos.")

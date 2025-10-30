@@ -25,33 +25,32 @@ for index, row in df_marcas.iterrows():
 
     # 2. Mapear las variantes a la marca correcta
     if isinstance(variantes_str, str) and variantes_str.strip():
-        # Separar las variantes por el pipe '|' y limpiar posibles espacios
+        # Separar las variantes por el '|' y limpiar posibles espacios
         variantes_list = [v.strip() for v in variantes_str.split('|')]
         for variante in variantes_list:
             if variante: # Asegurar que no sea una cadena vacía
                 mapeo_marcas[variante] = marca_correcta
 
 print(f"Número de entradas únicas en el mapeo: {len(mapeo_marcas)}")
-# print("Ejemplo de mapeo:", dict(list(mapeo_marcas.items())[:10])) # Descomenta para ver las primeras 10
+
 
 # Columna a limpiar
 columna_a_limpiar = 'automotor_marca_descripcion'
 columna_limpia = 'marca'
 
-# Aplicar el reemplazo usando el diccionario de mapeo
-# Usamos .map() con 'na_action=None' para preservar las marcas que no están en el diccionario
+
 df_datos[columna_limpia] = df_datos[columna_a_limpiar].map(mapeo_marcas, na_action='ignore')
 
-# Contar cuántas marcas no se pudieron mapear
+
 marcas_no_mapeadas = df_datos[columna_limpia].isna().sum()
 print(f"Número de marcas que se clasificarán como 'OTROS': {marcas_no_mapeadas}")
 
 # Reemplazar los valores NaN (los no mapeados) con 'OTROS'
 df_datos[columna_limpia] = df_datos[columna_limpia].fillna('OTROS')
 
-# Opcional: Si quieres ver las marcas que quedaron como 'OTROS'
+
 marcas_originales_otros = df_datos[df_datos[columna_limpia] == 'OTROS'][columna_a_limpiar].unique()
-# print("Marcas originales clasificadas como 'OTROS':", marcas_originales_otros)
+
 columnas_a_borrar = [
     'automotor_marca_descripcion',
     'automotor_marca_codigo',
@@ -67,33 +66,30 @@ columnas_a_borrar = [
 ]
 
 df_datos.drop(columns=[c for c in columnas_a_borrar if c in df_datos.columns], inplace=True)
-# Especifica el nombre del nuevo archivo CSV
+
 nombre_archivo_salida = 'datos_robos_limpio.csv'
 
-# Dentro de tu script de generación de mapeo, donde limpias el modelo:
+
 
 columna_modelo_sucio = "automotor_modelo_descripcion"
 columna_modelo_limpio = "modelo_normalizado"
 
 df_datos[columna_modelo_limpio] = df_datos[columna_modelo_sucio].fillna('').str.upper().str.strip()
-# Limpieza agresiva (Tu lógica actual)
+
 df_datos[columna_modelo_limpio] = df_datos[columna_modelo_limpio].str.replace(r'[^A-Z0-9\s]', ' ', regex=True) 
 df_datos[columna_modelo_limpio] = df_datos[columna_modelo_limpio].str.replace(r'\s+', ' ', regex=True)
 df_datos[columna_modelo_limpio] = df_datos[columna_modelo_limpio].str.strip()
 
-# MODIFICACIÓN CLAVE: Acorta el modelo a las primeras 3 palabras.
-# Esto reduce la especificidad para que 'CORSA 4 PUERTAS WIND 16 MPFI' mapee a 'CORSA 4 PUERTAS'
+
 df_datos[columna_modelo_limpio] = df_datos[columna_modelo_limpio].str.split(' ').str[:3].str.join(' ') 
 
 df_datos[columna_modelo_limpio] = df_datos[columna_modelo_limpio].replace('', np.nan) 
 
-# ... El resto del script de generación debe usar 'columna_modelo_limpio' para el conteo.
-# 2. Contar la frecuencia de la combinación (Marca limpia, Modelo sucio/normalizado)
-# Usaremos 'dropna' en el conteo para ignorar las filas que quedaron sin modelo
+
 df_conteo = df_datos.dropna(subset=['marca', columna_modelo_limpio])
 modelo_counts = df_conteo.groupby(['marca', columna_modelo_limpio]).size().reset_index(name='frecuencia')
 
-# Obtener marcas únicas para iterar (las que ya están limpias)
+# Obtener marcas únicas para iterar (
 marcas_unicas = modelo_counts['marca'].unique()
 
 output_rows = []
@@ -121,7 +117,7 @@ for marca in marcas_unicas:
         for match in similar_modelos:
             visited.add(match)
             
-        # 2.3 Elegir el modelo "correcto" y sumar frecuencias
+       
         
         # El modelo que inicia el clúster será el "CORRECTO"
         modelo_correcto = modelo_referencia 
@@ -149,9 +145,9 @@ print(f"✅ ¡Mapeo de modelos por marca generado con éxito en '{nombre_archivo
 # Exportar el DataFrame a CSV
 df_datos.to_csv(
     nombre_archivo_salida,
-    sep=',',         # Separador de columnas (el más común es la coma)
-    index=False,     # IMPORTANTE: Esto evita que se escriba el índice de pandas como una columna
-    encoding='utf-8' # Codificación de caracteres estándar
+    sep=',',         
+    index=False,     
+    encoding='utf-8'
 )
 
 print(f"✅ ¡Datos exportados con éxito a '{nombre_archivo_salida}'!")

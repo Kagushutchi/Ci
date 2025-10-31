@@ -12,7 +12,7 @@ BASE_FILENAME_PREFIX = "dnrpa-robos-recuperos-autos-"
 FILE_EXTENSION = ".csv"
 OUTPUT_FILENAME = "combined_optimized.csv"
 
-# Encabezado final (las 27 columnas "singularizadas" que pediste)
+
 FINAL_COLUMNS = [
     'tramite_tipo', 'tramite_fecha', 'fecha_inscripcion_inicial',
     'registro_seccional_codigo', 'registro_seccional_descripcion',
@@ -60,7 +60,7 @@ print(f"Archivo de salida: {OUTPUT_FILENAME}")
 print("-" * 30)
 
 while current_date <= END_DATE:
-    # Formatea el sufijo (ej: "201801")
+   
     date_suffix = current_date.strftime("%Y%m")
     filename = f"{BASE_FILENAME_PREFIX}{date_suffix}{FILE_EXTENSION}"
 
@@ -73,8 +73,7 @@ while current_date <= END_DATE:
                 low_memory=False # Ayuda a pandas a leer tipos mixtos
             )
 
-            # --- AQUÍ OCURRE LA "SINGULARIZACIÓN" ---
-            # Reordena/filtra el DF para que coincida EXACTAMENTE con las columnas pedidas
+            
             df_reindexed = df.reindex(columns=FINAL_COLUMNS)
 
             all_dataframes.append(df_reindexed)
